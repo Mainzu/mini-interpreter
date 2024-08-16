@@ -1,3 +1,17 @@
+// TODO: Introduction
+//!
+//! A token may not outlive the source it is derived from
+//! ```rust, compile_fail
+//! # use mini_interpreter::{source::{SourceFile, Span}, token};
+//! let source = SourceFile::new("example.txt", "let x = 42;");
+//! let mut lexer = lex::Lexer::new(source.cursor());
+//! let token = lexer.lex_token_full();
+//!
+//! drop(source);
+//!
+//! let _ = token;
+//! ```
+
 use core::fmt;
 use std::marker::PhantomData;
 
@@ -25,14 +39,15 @@ pub struct Full<'src> {
 }
 
 impl<'src> Core<'src> {
-    pub(crate) fn new(kind: Kind, start: usize) -> Self {
+    pub(crate) const fn new(kind: Kind, start: usize) -> Self {
         Self {
             kind,
             start,
             _src: PhantomData,
         }
     }
-    pub fn start(&self) -> usize {
+    #[inline]
+    pub const fn start(&self) -> usize {
         self.start
     }
 
@@ -89,14 +104,15 @@ impl<'src> fmt::Debug for Core<'src> {
 }
 
 impl<'src> Full<'src> {
-    pub(crate) fn new(kind: Kind, span: Span) -> Self {
+    pub(crate) const fn new(kind: Kind, span: Span) -> Self {
         Self {
             kind,
             span,
             _src: PhantomData,
         }
     }
-    pub fn span(&self) -> Span {
+    #[inline]
+    pub const fn span(&self) -> Span {
         self.span
     }
 
@@ -165,7 +181,10 @@ pub enum Kind {
     If,
     /// else
     Else,
-
+    /// let
+    Let,
+    /// ;
+    Semicolon,
     EOF,
 }
 
@@ -188,6 +207,8 @@ impl Kind {
                 Self::BangEqual => BangEqual::lex_length(src),
                 Self::If => If::lex_length(src),
                 Self::Else => Else::lex_length(src),
+                Self::Let => Let::lex_length(src),
+                Self::Semicolon => Semicolon::lex_length(src),
                 Self::EOF => 0,
             }
         }
@@ -207,7 +228,7 @@ impl fmt::Display for Kind {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Content<Variant: Lex> {
+pub struct Content<Variant: Lex + ?Sized> {
     pub value: <Variant as Lex>::Value,
     /// Byte length of the token
     pub length: usize,
@@ -250,40 +271,43 @@ pub struct StringLiteral;
 kind_conversion!(StringLiteral);
 
 macro_rules! static_kind {
-    ($kind:ident = $bytes:literal) => {
+    ($kind:ident = $str:literal) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         pub struct $kind;
         impl StaticLex for $kind {
-            const BYTES: &'static [u8] = $bytes;
+            const STR: &str = $str;
         }
         kind_conversion!($kind);
     };
 }
 
-static_kind!(Plus = b"+");
-static_kind!(Minus = b"-");
-// static_kind!(Star = b"*");
-// static_kind!(Slash = b"/");
-static_kind!(Equal = b"=");
-// static_kind!(Comma = b",");
-static_kind!(Dot = b".");
-static_kind!(DotDot = b"..");
-static_kind!(LeftParen = b"(");
-static_kind!(RightParen = b")");
-// static_kind!(LeftBrace = b"{");
-// static_kind!(RightBrace = b"}");
-// static_kind!(LeftBracket = b"[");
-// static_kind!(RightBracket = b"]");
-static_kind!(Bang = b"!");
-static_kind!(BangEqual = b"!=");
-static_kind!(EqualEqual = b"==");
-// static_kind!(Less = b"<");
-// static_kind!(LessEqual = b"<=");
-// static_kind!(Greater = b">");
-// static_kind!(GreaterEqual = b">=");
-static_kind!(If = b"if");
-static_kind!(Else = b"else");
+static_kind!(Plus = "+");
+static_kind!(Minus = "-");
+// static_kind!(Star = "*");
+// static_kind!(Slash = "/");
+static_kind!(Equal = "=");
+// static_kind!(Comma = ",");
+static_kind!(Dot = ".");
+static_kind!(Semicolon = ";");
+static_kind!(DotDot = "..");
+static_kind!(LeftParen = "(");
+static_kind!(RightParen = ")");
+// static_kind!(LeftBrace = "{");
+// static_kind!(RightBrace = "}");
+// static_kind!(LeftBracket = "[");
+// static_kind!(RightBracket = "]");
+static_kind!(Bang = "!");
+static_kind!(BangEqual = "!=");
+static_kind!(EqualEqual = "==");
+// static_kind!(Less = "<");
+// static_kind!(LessEqual = "<=");
+// static_kind!(Greater = ">");
+// static_kind!(GreaterEqual = ">=");
+static_kind!(If = "if");
+static_kind!(Else = "else");
+static_kind!(Let = "let");
 
+pub use export::*;
 pub mod export {
     pub use super::Content as TokenContent;
     pub use super::Core as TokenCore;

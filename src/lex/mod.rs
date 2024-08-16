@@ -40,34 +40,78 @@ impl fmt::Display for CharGroup {
         }
     }
 }
+/// Defines the interface for lexing tokens.
+///
+/// This trait provides methods for lexing (tokenizing) input text into specific tokens.
+/// Implementors of this trait can define how to recognize and extract tokens of a particular type.
+// TODO: Examples
+///
+/// # Safety
+///
+/// Some methods in this trait are marked as `unsafe`. These methods assume that
+/// `try_lex` has been called successfully before they are invoked. Calling these
+/// methods without proper checks may lead to undefined behavior.
+pub trait Lex {
+    /// The type of value corresponding to this token type.
+    type Value: Sized + fmt::Debug + Clone + PartialEq;
 
-pub trait Lex: Sized {
-    type Value: fmt::Debug + Clone + PartialEq;
-
+    /// Checks if the token can start with the given character.
+    ///
+    /// This method is used for quick checks to determine if a token of this type
+    /// can possibly start with the given character.
     fn can_start_with(lead: char) -> bool;
+
+    /// Attempts to lex a token, returning Ok(()) if successful.
+    ///
+    /// This method should perform all necessary checks to determine if the input
+    /// can be lexed as a valid token of this type.
     fn try_lex(src: TokenStarting<'_>) -> Result<()>;
 
+    /// Lexes the value of the token, assuming it's valid.
+    ///
+    /// # Safety
+    ///
+    /// This method assumes that a [`try_lex*`](Lex::try_lex) method has been called successfully.
+    /// Calling it without proper checks may lead to undefined behavior.
     unsafe fn lex_value(src: TokenStarting<'_>) -> Self::Value {
         Self::try_lex_value(src).unwrap_unchecked()
     }
+    /// Lexes the length of the token, assuming it's valid.
+    ///
+    /// # Safety
+    ///
+    /// This method assumes that a [`try_lex*`](Lex::try_lex) method has been called successfully.
+    /// Calling it without proper checks may lead to undefined behavior.
     unsafe fn lex_length(src: TokenStarting<'_>) -> usize {
         Self::try_lex_length(src).unwrap_unchecked()
     }
 
+    /// Attempts to lex the content of the token.
+    ///
+    /// Return both the value and the length of the lexed token.
     fn try_lex_content(src: TokenStarting<'_>) -> Result<token::Content<Self>>;
+    /// Attempts to lex only the value of the token.
     fn try_lex_value(src: TokenStarting<'_>) -> Result<Self::Value> {
         Self::try_lex_content(src).map(|fragment| fragment.value)
     }
+    /// Attempts to lex only the length of the token.
     fn try_lex_length(src: TokenStarting<'_>) -> Result<usize> {
         Self::try_lex_content(src).map(|fragment| fragment.length)
     }
 }
 
+/// Defines static lexing for fixed strings.
+///
+/// This trait is useful for tokens that have a fixed representation, such as
+/// keywords or specific symbols.
 pub trait StaticLex {
-    const BYTES: &[u8];
-    const STR: &'static str = unsafe { std::str::from_utf8_unchecked(Self::BYTES) };
+    /// The fixed string representation of this token.
+    const STR: &str;
+    /// The byte representation of the fixed string.
+    const BYTES: &[u8] = Self::STR.as_bytes();
+    /// Returns the length of the fixed string.
     fn length() -> usize {
-        Self::BYTES.len()
+        Self::STR.len()
     }
 }
 
@@ -103,17 +147,61 @@ impl<T: StaticLex> Lex for T {
             length: Self::length(),
         })
     }
+    fn try_lex_length(_src: TokenStarting<'_>) -> Result<usize> {
+        Ok(Self::length())
+    }
+    fn try_lex_value(_src: TokenStarting<'_>) -> Result<Self::Value> {
+        Ok(())
+    }
 }
 
+/// Represents a lexer for tokenizing input text.
+///
+/// This struct provides methods for lexing tokens from the input source.
+///
+/// # Examples
+///
+/// ```rust
+/// use mini_interpreter::{lex::Lexer, source::{Span, SourceFile}, token};
+///
+/// let source = SourceFile::new("example.txt", "let x = 42;");
+/// let mut lexer = Lexer::new(source.cursor());
+///
+/// assert_eq!(
+///     lexer.lex_token_full(),
+///     Ok(token::Kind::Let.spanning(Span::from(0..3)))
+/// );
+/// assert_eq!(
+///     lexer.lex_token_full(),
+///     Ok(token::Kind::Ident.spanning(Span::from(4..5)))
+/// );
+/// assert_eq!(
+///     lexer.lex_token_full(),
+///     Ok(token::Kind::Equal.spanning(Span::from(6..7)))
+/// );
+/// assert_eq!(
+///     lexer.lex_token_full(),
+///     Ok(token::Kind::NumberLiteral.spanning(Span::from(8..10)))
+/// );
+/// assert_eq!(
+///     lexer.lex_token_full(),
+///     Ok(token::Kind::Semicolon.spanning(Span::from(10..11)))
+/// );
+/// assert_eq!(
+///     lexer.lex_token_full(),
+///     Ok(token::Kind::EOF.spanning(Span::from(11..11)))
+/// );
+/// ```
 pub struct Lexer<'src> {
     cursor: SourceCursor<'src>,
 }
 
 impl<'src> Lexer<'src> {
+    /// Creates a new Lexer from a [`SourceCursor`].
     pub fn new(cursor: SourceCursor<'src>) -> Self {
         Self { cursor }
     }
-
+    /// Lexes the next token, returning its [core](token::Core) information.
     pub fn lex_token_core(&mut self) -> Result<TokenCore<'src>> {
         self.skip_whitespace();
 
@@ -122,6 +210,7 @@ impl<'src> Lexer<'src> {
             false => self.lex_core_content(),
         }
     }
+    /// Lexes the next token, returning its [full](token::Full) information.
     pub fn lex_token_full(&mut self) -> Result<TokenFull<'src>> {
         self.skip_whitespace();
 
@@ -165,6 +254,28 @@ impl<'src> Lexer<'src> {
             kind,
             Span::start_at(index).with_length(length),
         ))
+    }
+}
+impl<'src> Lexer<'src> {
+    /// Returns an iterator over [TokenCore] that replaces
+    /// [EOF](token::Kind::EOF) and [UnexpectedEOF](error::Kind::UnexpectedEOF)
+    /// with [None]
+    pub fn iter_core<'a>(&'a mut self) -> iter::CoreNoneEOF<'a, 'src> {
+        iter::CoreNoneEOF(self)
+    }
+    /// Returns an iterator over [TokenFull] that replaces
+    /// [EOF](token::Kind::EOF) and [UnexpectedEOF](error::Kind::UnexpectedEOF)
+    /// with [None]
+    pub fn iter_full<'a>(&'a mut self) -> iter::FullNoneEOF<'a, 'src> {
+        iter::FullNoneEOF(self)
+    }
+    /// Returns an iterator over [TokenCore] that always returns [Some]
+    pub fn iter_core_eof_as_some<'a>(&'a mut self) -> iter::CoreSomeEOF<'a, 'src> {
+        iter::CoreSomeEOF(self)
+    }
+    /// Returns an iterator over [TokenFull] that always returns [Some]
+    pub fn iter_full_eof_as_some<'a>(&'a mut self) -> iter::FullSomeEOF<'a, 'src> {
+        iter::FullSomeEOF(self)
     }
 }
 
@@ -225,25 +336,7 @@ impl<'a, 'src> From<&'a Result<TokenFull<'src>>> for Span {
     }
 }
 
-impl<'src> Lexer<'src> {
-    /// Returns an iterator over [TokenCore] that replaces [UnexpectedEOF](error::Kind::UnexpectedEOF) with [None]
-    pub fn iter_core<'a>(&'a mut self) -> iter::CoreNoneEOF<'a, 'src> {
-        iter::CoreNoneEOF(self)
-    }
-    /// Returns an iterator over [TokenFull] that replaces [UnexpectedEOF](error::Kind::UnexpectedEOF) with [None]
-    pub fn iter_full<'a>(&'a mut self) -> iter::FullNoneEOF<'a, 'src> {
-        iter::FullNoneEOF(self)
-    }
-    /// Returns an iterator over [TokenCore] that always returns [Some]
-    pub fn iter_core_eof_as_some<'a>(&'a mut self) -> iter::CoreSomeEOF<'a, 'src> {
-        iter::CoreSomeEOF(self)
-    }
-    /// Returns an iterator over [TokenFull] that always returns [Some]
-    pub fn iter_full_eof_as_some<'a>(&'a mut self) -> iter::FullSomeEOF<'a, 'src> {
-        iter::FullSomeEOF(self)
-    }
-}
-
+pub use export::*;
 pub mod export {
     pub use super::Error as LexError;
 }

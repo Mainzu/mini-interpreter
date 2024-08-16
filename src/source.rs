@@ -375,6 +375,7 @@ impl<'src> Cursor<'src> {
     }
 }
 
+pub use export::*;
 pub mod export {
     pub use super::Cursor as SourceCursor;
     pub use super::Directory as SourceDirectory;

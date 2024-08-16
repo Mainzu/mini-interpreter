@@ -35,7 +35,7 @@ impl Lex for token::Kind {
         is_xid_start(lead)
             || matches!(
                 lead,
-                '+' | '-' | '(' | ')' | '!' | '=' | ',' | '0'..='9' | '"'
+                '+' | '-' | '(' | ')' | '!' | '=' | ',' | ';' | '0'..='9' | '"'
             )
     }
 
@@ -53,6 +53,7 @@ impl Lex for token::Kind {
                 let build = match text[..length].as_bytes() {
                     If::BYTES => Content::build(Kind::If),
                     Else::BYTES => Content::build(Kind::Else),
+                    Let::BYTES => Content::build(Kind::Let),
                     _ => Content::build(Kind::Ident),
                 };
                 Ok(build(length))
@@ -85,6 +86,7 @@ impl Lex for token::Kind {
                     Dot::try_lex_length(src).map(Content::build(Kind::Dot))
                 }
             }
+            ';' => Semicolon::try_lex_length(src).map(Content::build(Kind::Semicolon)),
             '"' => StringLiteral::try_lex_length(src).map(Content::build(Kind::StringLiteral)),
             _ => Err(Error {
                 kind: error::Kind::UnrecognizedCharacter,
